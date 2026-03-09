@@ -1,0 +1,10 @@
+{
+    //https://furey.com.au/stuff/utils/exclude-except.html 参照
+    "files.exclude": {
+        "**/.git": true,
+        "**/.svn": true,
+        "**/.hg": true,
+        "**/.DS_Store": true,
+        "**/Thumbs.db": true
+    }
+}
