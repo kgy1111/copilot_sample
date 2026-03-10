@@ -1,0 +1,9 @@
+[package]
+name    = "myprotocol-usb"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+myprotocol-core = { path = "../myprotocol-core" }
+tokio           = { workspace = true }
+rusb            = "0.9"
