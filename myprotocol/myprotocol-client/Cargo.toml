@@ -1,0 +1,10 @@
+[package]
+name    = "myprotocol-client"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+myprotocol-core = { path = "../myprotocol-core" }
+myprotocol-tcp  = { path = "../myprotocol-tcp" }
+myprotocol-usb  = { path = "../myprotocol-usb" }
+tokio           = { workspace = true }

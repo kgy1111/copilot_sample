@@ -1,0 +1,12 @@
+[workspace]
+members = [
+    "myprotocol-core",
+    "myprotocol-tcp",
+    "myprotocol-usb",
+    "myprotocol-client",
+]
+resolver = "2"
+
+[workspace.dependencies]
+tokio     = { version = "1", features = ["full"] }
+thiserror = "2"

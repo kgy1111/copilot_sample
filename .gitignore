@@ -1,0 +1,16 @@
+# Rust ビルド成果物
+target/
+
+# Rust バックアップファイル（rustfmt が生成）
+**/*.rs.bk
+
+# 環境変数ファイル
+.env
+.env.*
+
+# OS 生成ファイル
+.DS_Store
+Thumbs.db
+
+# エディタ設定（チーム共有する場合はコメントアウトを外す）
+# .vscode/

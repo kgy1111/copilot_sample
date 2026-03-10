@@ -1,0 +1,8 @@
+[package]
+name    = "myprotocol-tcp"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+myprotocol-core  = { path = "../myprotocol-core" }
+tokio            = { workspace = true }
