@@ -9,8 +9,6 @@ pub struct TcpConfig {
     pub port: u16,
     /// 通信タイムアウト（デフォルト: 30s）
     pub timeout: Duration,
-    /// 再送回数（デフォルト: 0）
-    pub retry_count: u32,
     /// close() 時の最大待機時間（デフォルト: 5s）
     pub close_timeout: Duration,
     /// TLS 設定（将来拡張用・現在未使用）
@@ -24,7 +22,6 @@ impl Default for TcpConfig {
             address: String::new(),
             port: 0,
             timeout: Duration::from_secs(30),
-            retry_count: 0,
             close_timeout: Duration::from_secs(5),
             _tls: None,
         }
