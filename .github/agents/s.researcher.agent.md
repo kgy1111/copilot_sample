@@ -1,7 +1,7 @@
 ---
 description: 'Use when: 特定テーマの調査が必要。関連ファイル、パターン、依存関係、実装上の論点を整理する。'
 argument-hint: '調査したいテーマやタスク'
-tools: ['read/problems', 'read/readFile', 'search']
+tools: [read, search, agent, web/fetch]
 ---
 
 # Researcher Subagent - 調査・コンテキスト収集専門

@@ -1,11 +1,11 @@
 # Cワークフロー: ユーザー文書作成
 
-ユーザー向け文書を `@m.user-docs` で始めるための最小テンプレートです。
+ユーザー向け文書を `@s.user-docs` で始めるための最小テンプレートです。
 
 ## テンプレート
 
 ```markdown
-@m.user-docs [文書タイトル]のユーザー文書を作成してください。
+@s.user-docs [文書タイトル]のユーザー文書を作成してください。
 
 ## 文書タイプ
 <ユーザーガイド / FAQ / チュートリアル / インストールガイド / リリースノート>
@@ -35,4 +35,4 @@
 
 - [README.md](../README.md)
 - [agents/README.md](../agents/README.md)
-- [m.user-docs.agent.md](../agents/m.user-docs.agent.md)
+- [s.user-docs.agent.md](../agents/s.user-docs.agent.md)

@@ -1,7 +1,8 @@
 ---
 description: 'Use when: 設計や実装の大事故リスクを直感的に点検したい。経験則ベースで危ない匂いを拾う。'
 argument-hint: 'リスク確認したい設計や実装の概要'
-model: 'Claude Sonnet 4.6 (copilot)'
+model: 'Claude Opus 4.6'
+tools: [read, agent]
 ---
 
 # Super-Class Veteran Engineer Checker

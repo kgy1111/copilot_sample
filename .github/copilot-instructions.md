@@ -71,19 +71,18 @@
 
 | エージェント | 役割 | 呼び出しタイミング | ツール |
 |------------|------|------------------|--------|
-| `s.pm` | タスク全体の調整 | 複数ステップのタスク開始時 | vscodeAPI, runInTerminal, problems, readFile, createFile, editFiles, search, agent, todo |
-| `s.architect` | 設計・方針決定 | 新機能・設計変更が必要な場合 | codebase, textSearch, fileSearch, usages, problems, changes, fetch, agent, createFile, editFiles, readFile |
-| `s.researcher` | コンテキスト収集・調査 | 大規模調査・複数サブシステム分析時 | codebase, textSearch, fileSearch, usages, problems, changes, fetch, agent, readFile, listDirectory |
-| `s.explorer` | コードベース探索 | ファイル発見・依存関係マッピング時 | codebase, textSearch, fileSearch, usages, problems, changes, readFile, listDirectory |
-| `s.coder` | 実装・テスト | 設計完了後の実装作業 | createFile, editFiles, codebase, textSearch, usages, runInTerminal, runTests, problems, changes, agent, readFile |
-| `s.reviewer` | コードレビュー | 実装完了後の品質確認 | vscodeAPI, runInTerminal, problems, readFile, createFile, editFiles, search, agent, todo |
-| `s.legend` | 直感型リスク検知 | **s.pmが直接呼び出す**：①architect設計完了後（実装前）②reviewer差し戻し重大指摘時 | readFile, agent |
+| `s.pm` | タスク全体の調整 | 複数ステップのタスク開始時 | askQuestions, runInTerminal, getTerminalOutput, read, createFile, editFiles, search, agent, todo |
+| `s.user-docs` | ユーザー文書作成進行 | ユーザー文書作成時 | askQuestions, read, createFile, editFiles, search, agent, todo |
+| `s.architect` | 設計・方針決定 | 新機能・設計変更が必要な場合 | read, createFile, editFiles, search, agent |
+| `s.researcher` | コンテキスト収集・調査 | 大規模調査・複数サブシステム分析時 | read, search, agent, fetch |
+| `s.coder` | 実装・テスト | 設計完了後の実装作業 | read, edit, search, runInTerminal, getTerminalOutput, agent |
+| `s.dev-reviewer` | コードレビュー | 実装完了後の品質確認 | read, createFile, editFiles, search, runInTerminal, getTerminalOutput |
+| `s.legend` | 直感型リスク検知 | **s.pmが直接呼び出す**：①architect設計完了後（実装前）②reviewer差し戻し重大指摘時 | read, agent |
 
 **並列実行ガイドライン**:
 - 独立したタスクは並列実行を推奨（最大10並列）
 - pmが並列実行を調整し、サブエージェントに並列実行対象を指示
 - タスクチケットで並列実行対象を明示
-- explorerは必ず3〜10個の並列検索から開始
 - 複数のresearcherインスタンスを独立したサブシステム調査に並列利用可能
 - 明確に分離された機能のcoderは並列実行可能
 - 独立したフェーズのreviewerは並列実行可能
@@ -103,4 +102,4 @@
 テストを行う場合は`s.coder.agent.md`を参照
 
 ## レビューガイドライン
-レビューを行う場合は`s.reviewer.agent.md`を参照
+レビューを行う場合は`s.dev-reviewer.agent.md`を参照

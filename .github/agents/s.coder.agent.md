@@ -2,6 +2,7 @@
 description: 'Use when: 設計やタスクチケットに従って実装したい。コード修正、デバッグ、必要なテスト追加を行う。'
 argument-hint: '実装対象のタスクや変更内容'
 user-invocable: false
+tools: [read, edit, search, execute/runInTerminal, execute/getTerminalOutput, agent]
 ---
 
 コーディングエージェント。設計やタスクチケットに従ってコードの作成、修正、デバッグを担当します。

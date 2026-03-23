@@ -2,6 +2,7 @@
 description: 'Use when: ソフトウェア開発の実装完了後にレビューしたい。正確性、品質、テスト、設計書同期を確認し、承認可否を返す。'
 argument-hint: 'レビュー対象のソフトウェア開発タスクや観点'
 user-invocable: false
+tools: [read, edit/createFile, edit/editFiles, search, execute/runInTerminal, execute/getTerminalOutput]
 ---
 
 # Development Reviewer Subagent

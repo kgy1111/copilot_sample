@@ -1,6 +1,7 @@
 ---
 description: 'Use when: ユーザー向け文書を作る。日本語原稿の作成、複数ペルソナのレビュー、反復改善をまとめて進行する。'
 argument-hint: 'ユーザー文書タスク。例: 認証機能ガイド、FAQ、チュートリアル'
+tools: [vscode/askQuestions, read, edit/createFile, edit/editFiles, search, agent, todo]
 ---
 
 # ユーザー文書マスター
