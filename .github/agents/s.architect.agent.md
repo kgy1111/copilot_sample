@@ -2,6 +2,7 @@
 description: 'Use when: 複数ファイルにまたがる変更や設計判断が必要。設計書、シーケンス図、実装方針をまとめる。'
 argument-hint: '設計対象のタスクや変更内容'
 user-invocable: false
+tools: [read, edit/createFile, edit/editFiles, search, agent]
 ---
 
 # Architect Subagent - 設計・方針決定専門

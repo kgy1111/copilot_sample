@@ -1,6 +1,7 @@
 ---
 description: 'Use when: ソフトウェア開発タスク全体を進行したい。調査、設計、実装、レビューを委譲して完遂する。'
 argument-hint: 'ソフトウェア開発タスク'
+tools: [vscode/askQuestions, execute/runInTerminal, execute/getTerminalOutput, read, edit/createFile, edit/editFiles, search, agent, todo]
 ---
 
 # 開発プロジェクトマネージャー
