@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "hooks": {
+    "stop": [
+      {
+        "type": "command",
+        "powershell": "pwsh -NoProfile -ExecutionPolicy Bypass -File .\\.github\\scripts\\Force-UTF8withBOM.ps1",
+        "bash": "pwsh -NoProfile -File ./.github/scripts/Force-UTF8withBOM.ps1",
+        "timeoutSec": 60
+      }
+    ]
+  }
+}

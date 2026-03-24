@@ -1,0 +1,203 @@
+$ErrorActionPreference = 'Stop'
+
+# ============================================================
+# Target Extensions
+# Only these files are processed.
+# ============================================================
+
+$Utf8BomExtensions = @(
+    '.cpp',
+    '.h',
+    '.idl',
+    '.vcxproj',
+    '.vcxproj.filters',
+    '.cs',
+    '.csproj',
+    '.csv'
+)
+
+# Change to $false if you do not want line ending normalization.
+$NormalizeToCrlf = $true
+
+# ============================================================
+# Helpers
+# ============================================================
+
+function Get-NormalizedExtension {
+    param([string]$Path)
+
+    $name = [System.IO.Path]::GetFileName($Path).ToLowerInvariant()
+
+    if ($name.EndsWith('.vcxproj.filters')) {
+        return '.vcxproj.filters'
+    }
+
+    return [System.IO.Path]::GetExtension($name).ToLowerInvariant()
+}
+
+function Get-BomType {
+    param([byte[]]$Bytes)
+
+    if ($Bytes.Length -ge 3 -and
+        $Bytes[0] -eq 0xEF -and
+        $Bytes[1] -eq 0xBB -and
+        $Bytes[2] -eq 0xBF) {
+        return 'utf8Bom'
+    }
+
+    if ($Bytes.Length -ge 2 -and
+        $Bytes[0] -eq 0xFF -and
+        $Bytes[1] -eq 0xFE) {
+        return 'utf16LeBom'
+    }
+
+    if ($Bytes.Length -ge 2 -and
+        $Bytes[0] -eq 0xFE -and
+        $Bytes[1] -eq 0xFF) {
+        return 'utf16BeBom'
+    }
+
+    return 'none'
+}
+
+function Is-ValidUtf8 {
+    param([byte[]]$Bytes)
+
+    try {
+        $utf8 = New-Object System.Text.UTF8Encoding($false, $true)
+        $null = $utf8.GetString($Bytes)
+        return $true
+    }
+    catch {
+        return $false
+    }
+}
+
+function Normalize-LineEnding {
+    param([string]$Text)
+
+    $Text = $Text -replace "`r`n", "`n"
+    $Text = $Text -replace "`r", "`n"
+    return ($Text -replace "`n", "`r`n")
+}
+
+function ByteArray-Equals {
+    param(
+        [byte[]]$A,
+        [byte[]]$B
+    )
+
+    if ($null -eq $A -or $null -eq $B) {
+        return $false
+    }
+
+    if ($A.Length -ne $B.Length) {
+        return $false
+    }
+
+    for ($i = 0; $i -lt $A.Length; $i++) {
+        if ($A[$i] -ne $B[$i]) {
+            return $false
+        }
+    }
+
+    return $true
+}
+
+function Get-Utf8BomBytes {
+    param([string]$Text)
+
+    $enc = New-Object System.Text.UTF8Encoding($true)
+    return $enc.GetPreamble() + $enc.GetBytes($Text)
+}
+
+function Try-ReadUtf8Text {
+    param([byte[]]$Bytes)
+
+    $bomType = Get-BomType -Bytes $Bytes
+
+    switch ($bomType) {
+        'utf8Bom' {
+            return @{
+                Ok   = $true
+                Text = [System.Text.Encoding]::UTF8.GetString($Bytes, 3, $Bytes.Length - 3)
+                Kind = 'utf8Bom'
+            }
+        }
+        'utf16LeBom' {
+            return @{
+                Ok   = $false
+                Kind = 'utf16LeBom'
+            }
+        }
+        'utf16BeBom' {
+            return @{
+                Ok   = $false
+                Kind = 'utf16BeBom'
+            }
+        }
+        default {
+            if (Is-ValidUtf8 -Bytes $Bytes) {
+                return @{
+                    Ok   = $true
+                    Text = [System.Text.Encoding]::UTF8.GetString($Bytes)
+                    Kind = 'utf8NoBom'
+                }
+            }
+
+            return @{
+                Ok   = $false
+                Kind = 'unknown'
+            }
+        }
+    }
+}
+
+# ============================================================
+# Main Processing
+# ============================================================
+
+function Process-File {
+    param([string]$Path)
+
+    $ext = Get-NormalizedExtension -Path $Path
+
+    if (-not ($Utf8BomExtensions -contains $ext)) {
+        return
+    }
+
+    $originalBytes = [System.IO.File]::ReadAllBytes($Path)
+    $readResult = Try-ReadUtf8Text -Bytes $originalBytes
+
+    # Only process UTF-8 files. Skip UTF-16 or unknown encodings.
+    if (-not $readResult.Ok) {
+        return
+    }
+
+    $text = $readResult.Text
+
+    if ($NormalizeToCrlf) {
+        $text = Normalize-LineEnding -Text $text
+    }
+
+    $newBytes = Get-Utf8BomBytes -Text $text
+
+    if (ByteArray-Equals -A $originalBytes -B $newBytes) {
+        return
+    }
+
+    [System.IO.File]::WriteAllBytes($Path, $newBytes)
+}
+
+# ============================================================
+# Entry
+# ============================================================
+
+# Consume stdin if hook input is piped in.
+[Console]::In.ReadToEnd() | Out-Null
+
+Get-ChildItem -Recurse -File | ForEach-Object {
+    Process-File -Path $_.FullName
+}
+
+exit 0

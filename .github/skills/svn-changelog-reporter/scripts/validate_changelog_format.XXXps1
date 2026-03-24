@@ -1,0 +1,214 @@
+<#
+.SYNOPSIS
+    Validate changelog.md format
+
+.DESCRIPTION
+    Validates heading structure and required sections in changelog.md.
+    
+    Validation items:
+    - Title heading (# single) existence and content
+    - Week section heading (## double) format (YYYY-MM-DD - YYYY-MM-DD)
+    - Theme heading (### triple) existence
+    - Required subsections (3-line summary, change table) existence
+
+.PARAMETER Target
+    Target directory (default: src). Possible values: src, docs, etc.
+
+.EXAMPLE
+    .\validate_changelog_format.ps1
+    Validate src/changelog.md
+
+.EXAMPLE
+    .\validate_changelog_format.ps1 -Target docs
+    Validate docs/changelog.md
+#>
+
+param(
+    [string]$Target = "src"
+)
+
+#requires -Version 5.1
+$ErrorActionPreference = "Stop"
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+
+# Validation results holder
+$script:errors = @()
+$script:warnings = @()
+
+function Add-Error {
+    param([string]$Message)
+    $script:errors += $Message
+}
+
+function Add-Warning {
+    param([string]$Message)
+    $script:warnings += $Message
+}
+
+# Validate title heading
+function Test-Title {
+    param([string]$Content)
+    
+    $titlePattern = '^# SVN.*'
+    if ($Content -notmatch $titlePattern) {
+        Add-Error "Title heading not found or incorrect format. Expected: '# SVN...' pattern"
+    }
+}
+
+# Validate week section headings
+function Test-WeekSections {
+    param([string]$Content)
+    
+    # ## YYYY-MM-DD(Mon) - YYYY-MM-DD(Sun) format
+    $weekPattern = '(?m)^## (\d{4}-\d{2}-\d{2})\((Mon|Tue|Wed|Thu|Fri|Sat|Sun)\) - (\d{4}-\d{2}-\d{2})\((Mon|Tue|Wed|Thu|Fri|Sat|Sun)\)'
+    $matches = [regex]::Matches($Content, $weekPattern)
+    
+    if ($matches.Count -eq 0) {
+        Add-Error "Week section heading (## YYYY-MM-DD(Mon) - YYYY-MM-DD(Sun)) not found"
+        return
+    }
+    
+    Write-Host "Week sections: $($matches.Count)" -ForegroundColor Cyan
+    
+    foreach ($match in $matches) {
+        $startDate = $match.Groups[1].Value
+        $startDay = $match.Groups[2].Value
+        $endDate = $match.Groups[3].Value
+        $endDay = $match.Groups[4].Value
+        
+        # Date format validity check
+        try {
+            $start = [DateTime]::ParseExact($startDate, "yyyy-MM-dd", $null)
+            $end = [DateTime]::ParseExact($endDate, "yyyy-MM-dd", $null)
+            
+            if ($start -gt $end) {
+                Add-Warning "Week section date order reversed: $startDate($startDay) - $endDate($endDay)"
+            }
+            
+            # Verify start is Monday, end is Sunday
+            if ($startDay -ne "Mon") {
+                Add-Warning "Week section start date is not Monday: $startDate($startDay)"
+            }
+            if ($endDay -ne "Sun") {
+                Add-Warning "Week section end date is not Sunday: $endDate($endDay)"
+            }
+        } catch {
+            Add-Error "Invalid date format in week section: $startDate($startDay) - $endDate($endDay)"
+        }
+    }
+}
+
+# 必須サブセクションを検証
+# Validate required subsections
+function Test-RequiredSubsections {
+    param([string]$Content)
+    
+    # Split by week sections
+    $weekSections = $Content -split '(?m)^## \d{4}-\d{2}-\d{2}\((Mon|Tue|Wed|Thu|Fri|Sat|Sun)\) - \d{4}-\d{2}-\d{2}\((Mon|Tue|Wed|Thu|Fri|Sat|Sun)\)'
+    
+    # Skip first element (title part)
+    for ($i = 1; $i -lt $weekSections.Count; $i++) {
+        $section = $weekSections[$i]
+        
+        # Check for 3-line summary (existence of **3-line summary** or similar)
+        if ($section -notmatch '\*\*.*[Ss]ummary.*\*\*|\*\*3.*\*\*') {
+            Add-Warning "Week section $i is missing summary section"
+        }
+        
+        # Check for change table (| revision | author | format)
+        if ($section -notmatch '\|\s*revision\s*\|\s*author\s*\|') {
+            Add-Warning "Week section $i is missing change table header"
+        }
+        
+        # Check for theme headings (###)
+        $themeMatches = [regex]::Matches($section, '(?m)^### ')
+        if ($themeMatches.Count -eq 0) {
+            Add-Warning "Week section $i has no theme headings (###)"
+        }
+    }
+}
+
+# Validate heading levels (no #### or more)
+function Test-HeadingLevels {
+    param([string]$Content)
+    
+    $invalidHeadings = [regex]::Matches($Content, '(?m)^#{4,} ')
+    
+    if ($invalidHeadings.Count -gt 0) {
+        Add-Error "Invalid heading level (#### or more) found in $($invalidHeadings.Count) location(s). Maximum level is ###."
+    }
+}
+
+# Main logic
+try {
+    Write-Host "Target: $Target" -ForegroundColor Cyan
+    
+    # Get SVN working copy root
+    $svnInfo = svn info 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $wcRoot = $svnInfo | Select-String "^Working Copy Root Path: (.+)$" | ForEach-Object { $_.Matches.Groups[1].Value }
+        if ($wcRoot) {
+            $wcRoot = $wcRoot.Trim()
+            $fullPath = Join-Path $wcRoot "changelog.md"
+        } else {
+            # Fallback: try target directory
+            $workspaceRoot = Get-Location
+            $targetPath = Join-Path $workspaceRoot $Target
+            $fullPath = Join-Path $targetPath "changelog.md"
+        }
+    } else {
+        # No SVN, use current directory
+        $workspaceRoot = Get-Location
+        $targetPath = Join-Path $workspaceRoot $Target
+        $fullPath = Join-Path $targetPath "changelog.md"
+    }
+    
+    if (-not (Test-Path $fullPath)) {
+        Write-Host "[ERROR] File not found: $fullPath" -ForegroundColor Red
+        exit 1
+    }
+    
+    Write-Host "Validating: $fullPath" -ForegroundColor Cyan
+    
+    # Read file
+    $content = Get-Content $fullPath -Encoding UTF8 -Raw
+    
+    # Execute validations
+    Test-Title -Content $content
+    Test-WeekSections -Content $content
+    Test-RequiredSubsections -Content $content
+    Test-HeadingLevels -Content $content
+    
+    # Display results
+    Write-Host "`n=== Validation Results ===" -ForegroundColor Cyan
+    
+    if ($script:errors.Count -eq 0 -and $script:warnings.Count -eq 0) {
+        Write-Host "[SUCCESS] Format is correct." -ForegroundColor Green
+        exit 0
+    }
+    
+    if ($script:errors.Count -gt 0) {
+        Write-Host "`nErrors ($($script:errors.Count)):" -ForegroundColor Red
+        foreach ($err in $script:errors) {
+            Write-Host "  x $err" -ForegroundColor Red
+        }
+    }
+    
+    if ($script:warnings.Count -gt 0) {
+        Write-Host "`nWarnings ($($script:warnings.Count)):" -ForegroundColor Yellow
+        foreach ($warn in $script:warnings) {
+            Write-Host "  ! $warn" -ForegroundColor Yellow
+        }
+    }
+    
+    # Exit with code 1 if errors exist
+    if ($script:errors.Count -gt 0) {
+        exit 1
+    }
+    
+    exit 0
+    
+} catch {
+    Write-Host "`n[ERROR] $_" -ForegroundColor Red
+    exit 1
+}

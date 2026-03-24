@@ -1,0 +1,427 @@
+<#
+.SYNOPSIS
+    SVN changelog detailed diff report generator (unrecorded revisions only)
+
+.DESCRIPTION
+    Retrieves SVN history for the branch and generates detailed diff reports 
+    for revisions not yet recorded in changelog.md.
+    
+    Key features:
+    - Branch full history retrieval (--stop-on-copy)
+    - Latest recorded revision extraction from changelog.md
+    - Unrecorded revision detection and gap warnings
+    - Detailed diff report generation
+
+.PARAMETER Target
+    Target directory to analyze (default: src). Possible values: src, docs, etc.
+    The script will operate within the specified SVN-managed directory.
+
+.EXAMPLE
+    .\analyze_svn_changes.ps1
+    Run with default target (src)
+
+.EXAMPLE
+    .\analyze_svn_changes.ps1 -Target docs
+    Analyze docs directory
+#>
+
+param(
+    [string]$Target = "src"
+)
+
+#requires -Version 5.1
+$ErrorActionPreference = "Stop"
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+
+# Get SVN working copy root directory for specified target
+function Get-SvnRoot {
+    param([string]$TargetDir)
+    
+    $searchDir = Get-Location
+    
+    # Search upward for .svn folder
+    while ($searchDir -and ($searchDir -ne [System.IO.Path]::GetPathRoot($searchDir))) {
+        $svnDir = Join-Path $searchDir ".svn"
+        if (Test-Path $svnDir) {
+            # Found .svn, verify with svn info
+            Push-Location $searchDir
+            try {
+                $svnInfo = svn info 2>$null
+                if ($LASTEXITCODE -eq 0) {
+                    $wcRoot = $svnInfo | Select-String "^Working Copy Root Path: (.+)$" | ForEach-Object { $_.Matches.Groups[1].Value }
+                    if ($wcRoot) {
+                        return $wcRoot.Trim()
+                    }
+                    # Fallback: use directory with .svn
+                    return $searchDir
+                }
+            } finally {
+                Pop-Location
+            }
+        }
+        $searchDir = Split-Path $searchDir -Parent
+    }
+    
+    # Final fallback: try target directory from workspace root
+    $workspaceRoot = Get-Location
+    $targetPath = Join-Path $workspaceRoot $TargetDir
+    if (Test-Path $targetPath) {
+        Push-Location $targetPath
+        try {
+            $svnInfo = svn info 2>$null
+            if ($LASTEXITCODE -eq 0) {
+                $wcRoot = $svnInfo | Select-String "^Working Copy Root Path: (.+)$" | ForEach-Object { $_.Matches.Groups[1].Value }
+                if ($wcRoot) {
+                    return $wcRoot.Trim()
+                }
+            }
+        } finally {
+            Pop-Location
+        }
+    }
+    
+    throw "Could not detect SVN working copy. Please run from within $TargetDir directory or its subdirectory."
+}
+
+# Extract latest recorded revision from changelog.md
+function Get-LatestRecordedRevision {
+    param([string]$ChangelogPath)
+    
+    if (-not (Test-Path $ChangelogPath)) {
+        Write-Host "changelog.md not found. New creation required." -ForegroundColor Yellow
+        return $null
+    }
+    
+    $content = Get-Content $ChangelogPath -Encoding UTF8 -Raw
+    
+    # Extract revision numbers from change table (| rXXXXX | format)
+    $revisions = [regex]::Matches($content, '\|\s*r(\d+)\s*\|') | ForEach-Object { [int]$_.Groups[1].Value }
+    
+    if ($revisions.Count -eq 0) {
+        Write-Host "No revision records found in changelog.md." -ForegroundColor Yellow
+        return $null
+    }
+    
+    $latestRev = ($revisions | Measure-Object -Maximum).Maximum
+    Write-Host "Latest recorded revision in changelog.md: r$latestRev" -ForegroundColor Cyan
+    return $latestRev
+}
+
+# Get full branch history (--stop-on-copy)
+function Get-BranchHistory {
+    param([string]$SvnRoot)
+    
+    Write-Host "Retrieving branch history..." -ForegroundColor Cyan
+    
+    Push-Location $SvnRoot
+    try {
+        # svn log with --stop-on-copy
+        $proc = Start-Process -FilePath "svn" `
+            -ArgumentList "log", "-r", "1:HEAD", "--stop-on-copy", "--xml" `
+            -NoNewWindow -Wait -PassThru `
+            -RedirectStandardOutput "temp_log.xml" `
+            -RedirectStandardError "temp_err.txt"
+        
+        if ($proc.ExitCode -ne 0) {
+            $err = Get-Content "temp_err.txt" -Raw -ErrorAction SilentlyContinue
+            Remove-Item -Force "temp_log.xml", "temp_err.txt" -ErrorAction SilentlyContinue
+            throw "Failed to retrieve SVN log: $err"
+        }
+        
+        $xml = [xml](Get-Content "temp_log.xml" -Encoding UTF8)
+        Remove-Item -Force "temp_log.xml", "temp_err.txt" -ErrorAction SilentlyContinue
+        
+        return $xml.log.logentry
+    } finally {
+        Pop-Location
+    }
+}
+
+# Get revision diff
+function Get-RevisionDiff {
+    param([string]$Revision, [string]$SvnRoot)
+    
+    Push-Location $SvnRoot
+    try {
+        $prevRev = [int]$Revision - 1
+        $proc = Start-Process -FilePath "svn" `
+            -ArgumentList "diff", "-r", "$prevRev`:$Revision" `
+            -NoNewWindow -Wait -PassThru `
+            -RedirectStandardOutput "temp_diff.txt" `
+            -RedirectStandardError "temp_err.txt"
+        
+        if ($proc.ExitCode -ne 0) {
+            Remove-Item -Force "temp_diff.txt", "temp_err.txt" -ErrorAction SilentlyContinue
+            return ""
+        }
+        
+        $diff = Get-Content "temp_diff.txt" -Encoding UTF8 -Raw
+        Remove-Item -Force "temp_diff.txt", "temp_err.txt" -ErrorAction SilentlyContinue
+        
+        return $diff
+    } finally {
+        Pop-Location
+    }
+}
+
+# リビジョンの変更ファイルを取得
+function Get-ChangedFiles {
+    param([string]$Revision, [string]$SvnRoot)
+    
+    Push-Location $SvnRoot
+    try {
+        $proc = Start-Process -FilePath "svn" `
+            -ArgumentList "log", "-v", "-r", $Revision, "--xml" `
+            -NoNewWindow -Wait -PassThru `
+            -RedirectStandardOutput "temp_changes.xml" `
+            -RedirectStandardError "temp_err.txt"
+        
+        if ($proc.ExitCode -ne 0) {
+            Remove-Item -Force "temp_changes.xml", "temp_err.txt" -ErrorAction SilentlyContinue
+            return @()
+        }
+        
+        $xml = [xml](Get-Content "temp_changes.xml" -Encoding UTF8)
+        Remove-Item -Force "temp_changes.xml", "temp_err.txt" -ErrorAction SilentlyContinue
+        
+        $changes = @()
+        foreach ($path in $xml.log.logentry.paths.path) {
+            $action = $path.action
+            $file = $path.'#text'
+            
+            # SOURCE_ で始まるディレクトリを含むパスを対象
+            if ($file -match "SOURCE_") {
+                $category = Get-FileCategory $file
+                $changes += @{
+                    Action = $action
+                    Path = $file
+                    Category = $category
+                }
+            }
+        }
+        
+        return $changes
+    } finally {
+        Pop-Location
+    }
+}
+
+# ファイルパスを分類
+function Get-FileCategory {
+    param([string]$Path)
+    
+    if ($Path -match "GUM[\\/]GUM_XXXYYYYAOC6k2") { return "GUM" }
+    if ($Path -match "GUM[\\/]GUM_XXXYYYYInstDriver") { return "GUM" }
+    if ($Path -match "GUM[\\/]GUM_XXXYYYYAOC5k6k") { return "GUM" }
+    if ($Path -match "GUM[\\/]GUMtoDriver") { return "GUMtoDriver" }
+    if ($Path -match "GUM[\\/]") { return "GUM" }
+    if ($Path -match "SOURCE_INST") { return "INST" }
+    if ($Path -match "SOURCE_APP") { return "APP" }
+    if ($Path -match "SOURCE_GEN") { return "LIB" }
+    if ($Path -match "SOURCE_MNG") { return "MNG" }
+    return "OTHER"
+}
+
+# Main logic
+try {
+    Write-Host "Target: $Target" -ForegroundColor Cyan
+    
+    $svnRoot = Get-SvnRoot -TargetDir $Target
+    Write-Host "SVN Root: $svnRoot" -ForegroundColor Green
+    
+    # Prepare paths (changelog.md and detail reports at SVN root)
+    $changelogPath = Join-Path $svnRoot "changelog.md"
+    $detailDir = $svnRoot  # Output detail reports to SVN root
+    
+    Write-Host "Changelog Path: $changelogPath" -ForegroundColor Cyan
+    Write-Host "Detail Reports Dir: $detailDir" -ForegroundColor Cyan
+    
+    # Get latest recorded revision from changelog.md
+    $latestRecorded = Get-LatestRecordedRevision -ChangelogPath $changelogPath
+    
+    # Get full branch history
+    $allEntries = Get-BranchHistory -SvnRoot $svnRoot
+    
+    if (-not $allEntries) {
+        Write-Host "No change history found." -ForegroundColor Red
+        exit 1
+    }
+    
+    # Convert to array
+    if ($allEntries -isnot [Array]) {
+        $allEntries = @($allEntries)
+    }
+    
+    # Extract unrecorded revisions
+    $unrecordedEntries = if ($latestRecorded) {
+        $allEntries | Where-Object { [int]$_.revision -gt $latestRecorded }
+    } else {
+        # New creation: exclude first commit (branch creation)
+        if ($allEntries.Count -gt 1) {
+            Write-Host "New creation: Excluding branch creation commit (r$($allEntries[0].revision))" -ForegroundColor Yellow
+            $allEntries | Select-Object -Skip 1
+        } else {
+            $allEntries
+        }
+    }
+    
+    # Exclude merge commits
+    $beforeFilter = $unrecordedEntries.Count
+    $unrecordedEntries = $unrecordedEntries | Where-Object {
+        $msg = $_.msg
+        # Exclude common merge commit patterns
+        -not ($msg -match "^Merged" -or 
+              $msg -match "^Merge" -or 
+              $msg -match "^Merge branch" -or
+              $msg -match "^Merged revision")
+    }
+    
+    $filteredCount = $beforeFilter - $unrecordedEntries.Count
+    if ($filteredCount -gt 0) {
+        Write-Host "Merge commits excluded: $filteredCount" -ForegroundColor Yellow
+    }
+    
+    if ($unrecordedEntries.Count -eq 0) {
+        Write-Host "`nNo new changes found." -ForegroundColor Green
+        exit 0
+    }
+    
+    Write-Host "`nUnrecorded revisions: $($unrecordedEntries.Count)" -ForegroundColor Yellow
+    
+    # Revision gap check
+    if ($latestRecorded) {
+        $oldestUnrecorded = ($unrecordedEntries | ForEach-Object { [int]$_.revision } | Measure-Object -Minimum).Minimum
+        $expectedNext = $latestRecorded + 1
+        
+        if ($oldestUnrecorded -ne $expectedNext) {
+            Write-Host "WARNING: Revision gap detected!" -ForegroundColor Red
+            Write-Host "  Latest recorded: r$latestRecorded" -ForegroundColor Red
+            Write-Host "  Expected next: r$expectedNext" -ForegroundColor Red
+            Write-Host "  Actual oldest unrecorded: r$oldestUnrecorded" -ForegroundColor Red
+            Write-Host "  Gap: r$expectedNext - r$($oldestUnrecorded - 1)" -ForegroundColor Red
+        }
+    }
+    
+    # Generate detailed report
+    Write-Host "`nGenerating detailed diff report..." -ForegroundColor Cyan
+    
+    $analysis = @()
+    foreach ($entry in $unrecordedEntries) {
+        $rev = $entry.revision
+        $author = $entry.author
+        $date = [DateTime]::Parse($entry.date)
+        $message = $entry.msg
+        
+        Write-Host "  Analyzing r$rev..." -ForegroundColor Gray
+        $changes = Get-ChangedFiles -Revision $rev -SvnRoot $svnRoot
+        $diff = Get-RevisionDiff -Revision $rev -SvnRoot $svnRoot
+        
+        $analysis += @{
+            Revision = $rev
+            Author = $author
+            Date = $date
+            Message = $message
+            Changes = $changes
+            Diff = $diff
+        }
+    }
+    
+    # Get revision range
+    $revisions = $unrecordedEntries | ForEach-Object { [int]$_.revision } | Sort-Object
+    $minRev = ($revisions | Measure-Object -Minimum).Minimum
+    $maxRev = ($revisions | Measure-Object -Maximum).Maximum
+    
+    # Detail report filename
+    $detailFile = Join-Path $detailDir "detail_r${minRev}-r${maxRev}.md"
+    
+    # Build report content
+    $report = @"
+# SVN Detailed Change Report
+
+**Generated**: $(Get-Date -Format "yyyy-MM-dd HH:mm")  
+**Revision Range**: r$minRev - r$maxRev ($($analysis.Count) commits)  
+**Target**: $Target (--stop-on-copy)
+
+---
+
+## Summary
+
+"@
+    
+    # Category statistics
+    $categoryStats = @{}
+    foreach ($item in $analysis) {
+        foreach ($change in $item.Changes) {
+            $cat = $change.Category
+            if (-not $categoryStats.ContainsKey($cat)) {
+                $categoryStats[$cat] = @{ Add = 0; Modify = 0; Delete = 0 }
+            }
+            
+            switch ($change.Action) {
+                'A' { $categoryStats[$cat].Add++ }
+                'M' { $categoryStats[$cat].Modify++ }
+                'D' { $categoryStats[$cat].Delete++ }
+            }
+        }
+    }
+    
+    $report += "`n"
+    foreach ($cat in $categoryStats.Keys | Sort-Object) {
+        $stats = $categoryStats[$cat]
+        $report += "- **$cat**: Add $($stats.Add) / Modify $($stats.Modify) / Delete $($stats.Delete)`n"
+    }
+    
+    $report += "`n---`n`n## Detailed Change History`n`n"
+    
+    # Commit details
+    foreach ($item in $analysis) {
+        $report += "### r$($item.Revision) - $($item.Date.ToString('yyyy/MM/dd HH:mm'))`n`n"
+        $report += "**Author**: $($item.Author)`n"
+        $report += "**Message**: $($item.Message)`n`n"
+        
+        if ($item.Changes.Count -gt 0) {
+            $report += "**Changed Files**:`n`n"
+            
+            # Group by category
+            $grouped = $item.Changes | Group-Object -Property Category
+            foreach ($group in $grouped) {
+                $report += "- **$($group.Name)**:`n"
+                foreach ($change in $group.Group) {
+                    $actionStr = switch ($change.Action) {
+                        'A' { 'Add' }
+                        'M' { 'Modify' }
+                        'D' { 'Delete' }
+                        default { $change.Action }
+                    }
+                    $fileName = Split-Path $change.Path -Leaf
+                    $report += "  - [$actionStr] ``$fileName```n"
+                }
+            }
+            $report += "`n"
+        }
+        
+        # Diff section
+        if ($item.Diff) {
+            $report += "`n**Diff**:`n``````diff`n$($item.Diff)``````n"
+        }
+        
+        $report += "`n---`n`n"
+    }
+    
+    # Write to file (UTF-8 without BOM)
+    $utf8NoBom = New-Object System.Text.UTF8Encoding $false
+    [System.IO.File]::WriteAllText($detailFile, $report, $utf8NoBom)
+    
+    Write-Host "`n[SUCCESS] Detailed report generated" -ForegroundColor Green
+    Write-Host "  File: $detailFile" -ForegroundColor Green
+    Write-Host "  Revision Range: r$minRev - r$maxRev" -ForegroundColor Green
+    Write-Host "  Commits: $($analysis.Count)" -ForegroundColor Green
+    Write-Host "`nNext Steps:" -ForegroundColor Cyan
+    Write-Host "  1. Read the detailed report and append summary to $Target/changelog.md" -ForegroundColor White
+    Write-Host "  2. After appending summary, run cleanup_detail_reports.ps1 to remove detail reports" -ForegroundColor White
+    
+} catch {
+    Write-Host "`n[ERROR] $_" -ForegroundColor Red
+    Write-Host $_.ScriptStackTrace -ForegroundColor Red
+    exit 1
+}

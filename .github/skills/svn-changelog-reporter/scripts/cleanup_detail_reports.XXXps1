@@ -1,0 +1,112 @@
+<#
+.SYNOPSIS
+    Clean up detailed diff report files
+
+.DESCRIPTION
+    Removes detail_*.md files from the target SVN root directory.
+    Intended to be used after appending summary to changelog.md.
+
+.PARAMETER Target
+    Target directory (default: src). Possible values: src, docs, etc.
+
+.EXAMPLE
+    .\cleanup_detail_reports.ps1
+    Clean up detail reports in src/
+
+.EXAMPLE
+    .\cleanup_detail_reports.ps1 -Target docs
+    Clean up detail reports in docs/
+#>
+
+param(
+    [string]$Target = "src"
+)
+
+#requires -Version 5.1
+$ErrorActionPreference = "Stop"
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+
+# Get SVN working copy root (same logic as analyze_svn_changes.ps1)
+function Get-SvnRoot {
+    param([string]$TargetDir)
+    
+    $searchDir = Get-Location
+    
+    while ($searchDir -and ($searchDir -ne [System.IO.Path]::GetPathRoot($searchDir))) {
+        $svnDir = Join-Path $searchDir ".svn"
+        if (Test-Path $svnDir) {
+            Push-Location $searchDir
+            try {
+                $svnInfo = svn info 2>$null
+                if ($LASTEXITCODE -eq 0) {
+                    $wcRoot = $svnInfo | Select-String "^Working Copy Root Path: (.+)$" | ForEach-Object { $_.Matches.Groups[1].Value }
+                    if ($wcRoot) {
+                        return $wcRoot.Trim()
+                    }
+                    return $searchDir
+                }
+            } finally {
+                Pop-Location
+            }
+        }
+        $searchDir = Split-Path $searchDir -Parent
+    }
+    
+    $workspaceRoot = Get-Location
+    $targetPath = Join-Path $workspaceRoot $TargetDir
+    if (Test-Path $targetPath) {
+        Push-Location $targetPath
+        try {
+            $svnInfo = svn info 2>$null
+            if ($LASTEXITCODE -eq 0) {
+                $wcRoot = $svnInfo | Select-String "^Working Copy Root Path: (.+)$" | ForEach-Object { $_.Matches.Groups[1].Value }
+                if ($wcRoot) {
+                    return $wcRoot.Trim()
+                }
+            }
+        } finally {
+            Pop-Location
+        }
+    }
+    
+    throw "Could not detect SVN working copy for target: $TargetDir"
+}
+
+try {
+    Write-Host "Target: $Target" -ForegroundColor Cyan
+    
+    $svnRoot = Get-SvnRoot -TargetDir $Target
+    Write-Host "SVN Root: $svnRoot" -ForegroundColor Green
+    
+    $targetDir = $svnRoot  # Detail reports are in SVN root
+    
+    if (-not (Test-Path $targetDir)) {
+        Write-Host "Directory not found: $targetDir" -ForegroundColor Yellow
+        exit 0
+    }
+    
+    # Search for detail_*.md files
+    $detailFiles = Get-ChildItem -Path $targetDir -Filter "detail_*.md" -File
+    
+    if ($detailFiles.Count -eq 0) {
+        Write-Host "No detail reports found to delete." -ForegroundColor Green
+        exit 0
+    }
+    
+    Write-Host "Files to delete:" -ForegroundColor Cyan
+    foreach ($file in $detailFiles) {
+        Write-Host "  - $($file.Name)" -ForegroundColor White
+    }
+    
+    # Execute deletion
+    foreach ($file in $detailFiles) {
+        Remove-Item $file.FullName -Force
+        Write-Host "[DELETED] $($file.Name)" -ForegroundColor Green
+    }
+    
+    Write-Host "`n[SUCCESS] Deleted $($detailFiles.Count) file(s)." -ForegroundColor Green
+    
+} catch {
+    Write-Host "`n[ERROR] $_" -ForegroundColor Red
+    exit 1
+}
